@@ -165,12 +165,23 @@ class PhysicsEngine:
 # Set the page layout to wide for better use of screen real estate and set a title for the browser tab.
 st.set_page_config(layout="wide", page_title="Projectile Motion Simulator")
 
+# Initialize session state for comparison mode
+if 'trajectories' not in st.session_state:
+    st.session_state.trajectories = []
+if 'max_x' not in st.session_state:
+    st.session_state.max_x = 100.0
+if 'max_y' not in st.session_state:
+    st.session_state.max_y = 50.0
+
 # Set the main title for the Streamlit application.
 st.title("Projectile Motion Simulator")
 
 # --- Sidebar for Controls ---
 # Create a sidebar for user inputs, keeping the main area clean for the plot and metrics.
 st.sidebar.title("Controls")
+
+# Comparison Mode Toggle
+comparison_mode = st.sidebar.checkbox("Comparison Mode", value=False, help="Compare multiple trajectories on the same graph.")
 
 # Slider for Initial Velocity
 # Provides a visual way to adjust the initial speed of the projectile.
@@ -214,8 +225,32 @@ metrics = physics_engine.get_flight_metrics(initial_velocity, launch_angle)
 # Calculate the points that define the projectile's trajectory.
 trajectory_points = physics_engine.calculate_trajectory(initial_velocity, launch_angle)
 
+# --- Comparison Mode Controls ---
+if comparison_mode:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Comparison Settings")
+    
+    label = st.sidebar.text_input("Trajectory Label", value=f"{planet} {initial_velocity}m/s {launch_angle}°")
+    
+    if st.sidebar.button("Add to Comparison"):
+        df_new = pd.DataFrame(trajectory_points, columns=['Time', 'X', 'Y'])
+        df_new['Label'] = label
+        st.session_state.trajectories.append(df_new)
+        
+        # Update locked axes bounds
+        current_max_x = df_new['X'].max()
+        current_max_y = df_new['Y'].max()
+        st.session_state.max_x = max(st.session_state.max_x, current_max_x * 1.1)
+        st.session_state.max_y = max(st.session_state.max_y, current_max_y * 1.1)
+        st.rerun()
+
+    if st.sidebar.button("Clear All Trajectories"):
+        st.session_state.trajectories = []
+        st.session_state.max_x = 100.0
+        st.session_state.max_y = 50.0
+        st.rerun()
+
 # --- Display Metric Cards ---
-# Use columns to display the key flight metrics in a visually appealing card format.
 st.header("Flight Metrics") # Header for the metrics section
 col1, col2, col3 = st.columns(3) # Create three columns for the metrics
 
@@ -241,56 +276,51 @@ col3.metric(
 # --- Plotting the Trajectory ---
 st.header("Trajectory Visualization") # Header for the plot section
 
-# Create a Pandas DataFrame from the calculated trajectory points.
-# DataFrames are convenient for Plotly to process.
-if trajectory_points: # Proceed only if trajectory points were successfully calculated
-    df = pd.DataFrame(trajectory_points, columns=['Time', 'X', 'Y'])
+if trajectory_points:
+    # Prepare data for plotting
+    current_df = pd.DataFrame(trajectory_points, columns=['Time', 'X', 'Y'])
+    current_df['Label'] = "Current"
     
-    # Create an interactive scatter plot using Plotly Express.
-    # 'x' and 'y' are mapped to the horizontal and vertical distances.
-    fig = px.scatter(
-        df,
+    if comparison_mode and st.session_state.trajectories:
+        # Combine all trajectories
+        plot_df = pd.concat(st.session_state.trajectories + [current_df])
+        title = "Projectile Comparison"
+        color_col = 'Label'
+        show_legend = True
+    else:
+        plot_df = current_df
+        title = f'Projectile Trajectory ({planet})'
+        color_col = None
+        show_legend = False
+
+    # Create plot
+    fig = px.line(
+        plot_df,
         x='X',
         y='Y',
-        title=f'Projectile Trajectory ({planet})', # Dynamic title based on selected planet
+        color=color_col,
+        title=title,
         labels={'X': 'Horizontal Distance (m)', 'Y': 'Vertical Distance (m)'},
-        hover_data={'Time': ':.2f', 'X': ':.2f', 'Y': ':.2f'},
-        color_discrete_sequence=['blue']
+        hover_data={'Time': ':.2f', 'X': ':.2f', 'Y': ':.2f'}
     )
     
-    # Customize the plot to better represent projectile motion visually.
-    fig.update_traces(
-        mode='lines+markers', # Show both lines connecting points and markers at each point
-        marker=dict(size=5, color='red'), # Style for the markers (e.g., the projectile itself)
-        line=dict(width=2, color='blue'), # Style for the trajectory line
-        showlegend=False
-    )
+    # Update axes to be "locked" if comparison mode is on
+    if comparison_mode:
+        fig.update_xaxes(range=[0, st.session_state.max_x])
+        fig.update_yaxes(range=[0, st.session_state.max_y])
     
-    # Further adjust layout for better aesthetics and clarity.
     fig.update_layout(
-        xaxis=dict(
-            title='Horizontal Distance (m)',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='Gray'
-        ),
-        yaxis=dict(
-            title='Vertical Distance (m)',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='Gray'
-        ),
+        xaxis=dict(showgrid=True, zeroline=True, zerolinecolor='Gray'),
+        yaxis=dict(showgrid=True, zeroline=True, zerolinecolor='Gray'),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
+        showlegend=show_legend,
         margin=dict(l=50, r=50, t=50, b=50)
     )
 
-    # Display the Plotly chart in the Streamlit application.
-    # use_container_width=True makes the chart responsive to the container width.
     st.plotly_chart(fig, use_container_width=True)
 else:
-    # Display a warning if trajectory points could not be calculated.
-    st.warning("Could not calculate trajectory points. Please check input parameters.")
+    st.warning("Could not calculate trajectory points.")
 
 # Informational markdown text at the bottom.
 st.markdown("""
